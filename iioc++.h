@@ -7,6 +7,7 @@
 class Buffer;
 class Device;
 class Context;
+class Context_Devices;
 
 class Buffer {
     iio_buffer* a;
@@ -83,28 +84,35 @@ public:
     Device(iio_device* device) {
         dev = device;
     }
+    std::string id();
+    std::string name();
+};
 
-    std::string id() {
-        return std::string(iio_device_get_id(dev));
+class Context_Devices {
+    Context* a;
+public:
+    Context_Devices(Context* b) {
+        a = b;
     }
-
-    std::string name() {
-        return std::string(iio_device_get_name(dev));
-    }
+    int size();
+    Device operator[] (unsigned int i);
+    Device operator[] (std::string s);
 };
 
 class Context {
     iio_context* a;
+    Context_Devices c;
 public:
-    Context(iio_context* con) {
+    friend Context_Devices;
+    Context(iio_context* con): c(this) {
         a = con;
     }
 
-    Context() {
+    Context(): c(this) {
         a = iio_create_default_context();
     }
 
-    Context(std::string type, std::string s = "") {
+    Context(std::string type, std::string s = ""): c(this) {
         if (type == "uri") {
             a = iio_create_context_from_uri(s.c_str());
         } else if (type == "local") {
@@ -116,7 +124,7 @@ public:
         }
     }
 
-    Context(const Context& c) {
+    Context(const Context& c): c(this) {
         a = iio_context_clone(c.a);
     }
 
@@ -135,7 +143,27 @@ public:
     unsigned int devices_count() {
         return iio_context_get_devices_count(a);
     }
-    std::string type() {
+    std::string name() {
         return std::string(iio_context_get_name(a));
     }
 };
+
+std::string Device::id() {
+    return std::string(iio_device_get_id(dev));
+}
+
+std::string Device::name() {
+    return std::string(iio_device_get_name(dev));
+}
+
+int Context_Devices::size() {
+    return iio_context_get_devices_count(a->a);
+}
+
+Device Context_Devices::operator[] (unsigned int i) {
+    return iio_context_get_device(a->a, i);
+}
+
+Device Context_Devices::operator[] (std::string s) {
+    return iio_context_find_device(a->a, s.c_str());
+}
