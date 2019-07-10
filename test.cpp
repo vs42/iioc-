@@ -270,13 +270,12 @@ int main (int argc, char **argv)
 		double noise = 0;
 		auto j = txbuf->begin();
 		for (auto i = rxbuf->begin(); !(i == rxbuf->end()); ++i) {
-			noise += pow(((*i)[0] - (*j)[0]), 2);
-			noise += pow(((*i)[1] - (*j)[1]), 2);
+			noise += pow(((*i).imag() - (*j).imag()), 2);
+			noise += pow(((*i).real() - (*j).real()), 2);
 			j++;
 		}
 		for (auto i = txbuf->begin(); !(i == txbuf->end()); ++i) {
-			(*i)[0] = (int)(sin(a / 400.) * 32767 /16);
-			(*i)[1] = (int)(cos(a / 400.) * 32767/16);
+			*i = std::complex<int16_t>((int)(cos(a / 400.) * 32767/16), (int)(sin(a / 400.) * 32767 /16));
 			a++;
         }
 		printf("\tnoise - %f\n", sqrt(noise / (nbytes_rx / iio_device_get_sample_size(rx))));

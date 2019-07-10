@@ -1,137 +1,141 @@
 #include "iio.h"
+#include <complex>
+#include <vector>
+#include <string>
+#include <assert.h>
 
 class Buffer;
-
-class Iterator_Buffer {
-protected:
-    Buffer* buf;
-    char* a;
-    ptrdiff_t step;
-public:
-    Iterator_Buffer(const Iterator_Buffer &x) {
-        buf = x.buf;
-        a = x.a;
-        step = x.step;
-    }
-
-    Iterator_Buffer(Buffer* b, char* c, ptrdiff_t s) {
-        buf = b;
-        a = c;
-        step = s;
-    }
-
-// Define prefix increment operator.
-    Iterator_Buffer& operator++()
-    {
-       a += step;
-       return *this;
-    }
-
-// Define postfix increment operator.
-    Iterator_Buffer operator++(int)
-    {
-       Iterator_Buffer temp = *this;
-       ++*this;
-       return temp;
-    }
-
-    int16_t* operator*() {
-       return (int16_t*)a;
-    }
-
-    bool operator==(const Iterator_Buffer& a) const {
-        return (a.buf == this->buf) && (a.a == this->a);
-    }
-    bool operator!=(const Iterator_Buffer& a) const {
-        return !((*this) == a);
-    }
-};
-
-class constIterator_Buffer {
-protected:
-    const Buffer* buf;
-    char* a;
-    ptrdiff_t step;
-public:
-    constIterator_Buffer(constIterator_Buffer &x) {
-        buf = x.buf;
-        a = x.a;
-        step = x.step;
-    }
-
-    constIterator_Buffer(const Buffer* b, char* c, ptrdiff_t s) {
-        buf = b;
-        a = c;
-        step = s;
-    }
-
-// Define prefix increment operator.
-    constIterator_Buffer& operator++()
-    {
-       a += step;
-       return *this;
-    }
-
-// Define postfix increment operator.
-    constIterator_Buffer operator++(int)
-    {
-       constIterator_Buffer temp = *this;
-       ++*this;
-       return temp;
-    }
-
-    const int16_t* operator*() {
-       return (int16_t*)a;
-    }
-};
-
+class Device;
+class Context;
 
 class Buffer {
-    iio_buffer *a;
+    iio_buffer* a;
+    std::vector<std::complex<int16_t>> v;
 public:
     ptrdiff_t step() const{
         return iio_buffer_step(a);
     }
+
     Buffer(const struct iio_device *dev, size_t samples_count = 1024*1024, bool cyclic = false) {
         a = iio_device_create_buffer(dev, samples_count, cyclic);
+        int i = 0;
+        for (auto t_dat = (char *)iio_buffer_first(a, NULL); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
+		    v.push_back(std::complex<int16_t>());
+			v[i] = std::complex<int16_t>(((int16_t*)t_dat)[1], ((int16_t*)t_dat)[0]);
+			i++;
+		}
+		assert(this->step() == sizeof(int16_t));
     }
+
     void destroy() {
+        v.clear();
         iio_buffer_destroy(a);
     }
+
     ~Buffer() {
         this->destroy();
     }
-    Iterator_Buffer begin() {
-        iio_buffer_first(a, NULL);
-        Iterator_Buffer it(this, (char *)iio_buffer_first(a, NULL), iio_buffer_step(a));
-        return it;
+
+    std::vector<std::complex<int16_t>>::iterator begin() {
+        return v.begin();
     }
-    Iterator_Buffer end() {
-        iio_buffer_first(a, NULL);
-        Iterator_Buffer it(this, (char *)iio_buffer_end(a), iio_buffer_step(a));
-        return it;
+
+    std::vector<std::complex<int16_t>>::iterator end() {
+        return v.end();
     }
-    constIterator_Buffer begin() const {
-        iio_buffer_first(a, NULL);
-        constIterator_Buffer it(this, (char *)iio_buffer_first(a, NULL), iio_buffer_step(a));
-        return it;
+
+    std::vector<std::complex<int16_t>>::const_iterator begin() const {
+        return v.begin();
     }
-    constIterator_Buffer end() const {
-        iio_buffer_first(a, NULL);
-        constIterator_Buffer it(this, (char *)iio_buffer_end(a), iio_buffer_step(a));
-        return it;
+
+    std::vector<std::complex<int16_t>>::const_iterator end() const {
+        return v.end();
     }
+
     ssize_t push(size_t samples_count = 0) {
+        int i = 0;
+        for (auto t_dat = (char *)iio_buffer_first(a, NULL); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
+			((int16_t*)t_dat)[0] = v[i].imag();
+			((int16_t*)t_dat)[1] = v[i].real();
+			i++;
+		}
         if (samples_count == 0) {
             return iio_buffer_push(a);
         } else {
             return iio_buffer_push_partial(a, samples_count);
         }
     }
+
     ssize_t refill() {
-        return iio_buffer_refill(a);
+        auto ret = iio_buffer_refill(a);
+        int i = 0;
+        for (auto t_dat = (char *)iio_buffer_first(a, NULL); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
+			v[i] = std::complex<int16_t>(((int16_t*)t_dat)[1], ((int16_t*)t_dat)[0]);
+			i++;
+		}
+        return ret;
     }
-    int16_t* operator[](size_t x) {
-        return (int16_t*)((char *)iio_buffer_first(a, NULL) + (iio_buffer_step(a) * x));
+};
+
+class Device {
+    iio_device *dev;
+public:
+    Device(iio_device* device) {
+        dev = device;
+    }
+
+    std::string id() {
+        return std::string(iio_device_get_id(dev));
+    }
+
+    std::string name() {
+        return std::string(iio_device_get_name(dev));
+    }
+};
+
+class Context {
+    iio_context* a;
+public:
+    Context(iio_context* con) {
+        a = con;
+    }
+
+    Context() {
+        a = iio_create_default_context();
+    }
+
+    Context(std::string type, std::string s = "") {
+        if (type == "uri") {
+            a = iio_create_context_from_uri(s.c_str());
+        } else if (type == "local") {
+            a = iio_create_local_context();
+        } else if (type == "network") {
+            a = iio_create_network_context(s.c_str());
+        } else {
+            assert(0);
+        }
+    }
+
+    Context(const Context& c) {
+        a = iio_context_clone(c.a);
+    }
+
+    void destroy() {
+        iio_context_destroy(a);
+    }
+
+    ~Context() {
+        this->destroy();
+    }
+
+    Device find_device(std::string s) {
+        return Device(iio_context_find_device(a, s.c_str()));
+    }
+
+    unsigned int devices_count() {
+        return iio_context_get_devices_count(a);
+    }
+    std::string type() {
+        return std::string(iio_context_get_name(a));
     }
 };
