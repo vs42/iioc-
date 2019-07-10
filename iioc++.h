@@ -101,8 +101,8 @@ public:
 
 class Context {
     iio_context* a;
-    Context_Devices c;
 public:
+    Context_Devices devices;
     friend Context_Devices;
     Context(iio_context* con): c(this) {
         a = con;
