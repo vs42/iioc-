@@ -8,6 +8,7 @@ class Buffer;
 class Device;
 class Context;
 class Channel;
+class Device_Channels;
 class Device_Attribute;
 class Channel_Attribute;
 class Device_Attributes;
@@ -39,7 +40,19 @@ public:
     }
     int size();
     std::string operator[] (unsigned int i);
-    Device_Attribute operator[] (std::string& s);
+    Device_Attribute operator[] (std::string s);
+};
+
+class Device_Channels {
+    Device* a;
+    bool out;
+public:
+    Device_Channels(Device* b, bool outc) {
+        a = b;
+        out = outc;
+    }
+    int size();
+    Channel* operator[] (std::string s);
 };
 
 class Device {
@@ -48,8 +61,11 @@ public:
     friend Buffer;
     friend Device_Attributes;
     friend Device_Attribute;
+    friend Device_Channels;
+    Device_Channels in;
+    Device_Channels out;
     Device_Attributes attributes;
-    Device(iio_device* device) : attributes(this) {
+    Device(iio_device* device) : attributes(this), in(this, false), out(this, true) {
         dev = device;
     }
     size_t sample_size() {
@@ -71,12 +87,12 @@ public:
     Buffer(Device *dev, size_t samples_count = 1024*1024, bool cyclic = false) {
         a = iio_device_create_buffer(dev->dev, samples_count, cyclic);
         int i = 0;
-        for (auto t_dat = (char *)iio_buffer_first(a, NULL); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
+        for (auto t_dat = (char *)iio_buffer_start(a); t_dat != iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
 		    v.push_back(std::complex<int16_t>());
 			v[i] = std::complex<int16_t>(((int16_t*)t_dat)[1], ((int16_t*)t_dat)[0]);
 			i++;
 		}
-		assert(this->step() == sizeof(int16_t));
+		assert(this->step() == sizeof(int16_t) * 2);
     }
 
     void destroy() {
@@ -106,7 +122,7 @@ public:
 
     ssize_t push(size_t samples_count = 0) {
         int i = 0;
-        for (auto t_dat = (char *)iio_buffer_first(a, NULL); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
+        for (auto t_dat = (char *)iio_buffer_start(a); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
 			((int16_t*)t_dat)[0] = v[i].imag();
 			((int16_t*)t_dat)[1] = v[i].real();
 			i++;
@@ -121,7 +137,7 @@ public:
     ssize_t refill() {
         auto ret = iio_buffer_refill(a);
         int i = 0;
-        for (auto t_dat = (char *)iio_buffer_first(a, NULL); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
+        for (auto t_dat = (char *)iio_buffer_start(a); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
 			v[i] = std::complex<int16_t>(((int16_t*)t_dat)[1], ((int16_t*)t_dat)[0]);
 			i++;
 		}
@@ -283,7 +299,7 @@ std::string Device_Attributes::operator[] (unsigned int i) {
     return std::string(iio_device_get_attr(a->dev, i));
 }
 
-Device_Attribute Device_Attributes::operator[] (std::string& s) {
+Device_Attribute Device_Attributes::operator[] (std::string s) {
     return Device_Attribute(s, a);
 }
 
@@ -354,4 +370,10 @@ bool Channel_Attribute::operator ==(Channel_Attribute d) {
 
 std::string Channel_Attribute::value() {
     return std::string(iio_channel_find_attr(dev->a, key.c_str()));
+}
+
+Channel* Device_Channels::operator[] (std::string s) {
+    Channel* ret;
+    ret = new Channel(iio_device_find_channel(a->dev, s.c_str(), out));
+    return ret;
 }

@@ -23,11 +23,12 @@
 #include <stdio.h>
 #include <math.h>
 
+#include <iostream>
+
 #ifdef __APPLE__
 #include <iio/iio.h>
 #else
 #include "iioc++.h"
-#include "iio.h"
 #endif
 
 /* helper macros */
@@ -67,23 +68,6 @@ Buffer  *txbuf = NULL;
 
 static bool stop;
 
-/* cleanup and exit */
-static void shutdown()
-{
-	printf("* Destroying buffers\n");
-	rxbuf->destroy();
-	txbuf->destroy();
-	printf("* Disabling streaming channels\n");
-	rx0_i->disable();
-	rx0_q->disable();
-	tx0_i->disable();
-	tx0_q->disable();
-
-	printf("* Destroying context\n");
-	ctx->destroy();
-	exit(0);
-}
-
 static void handle_sig(int sig)
 {
 	printf("Waiting for process to finish...\n");
@@ -92,33 +76,25 @@ static void handle_sig(int sig)
 
 /* check return value of attr_write function */
 static void errchk(int v, const char* what) {
-	 if (v < 0) { fprintf(stderr, "Error %d writing to channel \"%s\"\nvalue may not be supported.\n", v, what); shutdown(); }
+	 if (v < 0) { fprintf(stderr, "Error %d writing to channel \"%s\"\nvalue may not be supported.\n", v, what); exit(0); }
 }
 
-/* write attribute: long long int */
-static void wr_ch_lli(Channel *chn, const char* what, long long val)
-{
-	chn->attributes[what] = val;
-}
-
-/* write attribute: string */
-static void wr_ch_str(Channel *chn, const char* what, const char* str)
-{
-	chn->attributes[what] =  str;
-}
-
-/* helper function generating channel names */
-static char* get_ch_name(const char* type, int id)
-{
-	snprintf(tmpstr, sizeof(tmpstr), "%s%d", type, id);
-	return tmpstr;
-}
-
-/* returns ad9361 phy device */
-Device* get_ad9361_phy(Context *ctx)
-{
-	Device *dev =  ctx->devices["ad9361-phy"];
-	return dev;
+std::string itos (int n) {
+    if (n == 0) {
+        return "0";
+    }
+    int d = 1;
+    while (d <= n) {
+        d *= 10;
+    }
+    d /= 10;
+    std::string s;
+    while (d > 0) {
+        s += '0' + (n / d);
+        n %= d;
+        d /= 10;
+    }
+    return s;
 }
 
 /* finds AD9361 streaming IIO devices */
@@ -134,18 +110,18 @@ static bool get_ad9361_stream_dev(Context *ctx, enum iodev d, Device **dev)
 /* finds AD9361 streaming IIO channels */
 static bool get_ad9361_stream_ch(Context *ctx, enum iodev d, Device *dev, int chid, Channel **chn)
 {
-	*chn = dev->find_channel(get_ch_name("voltage", chid), d == TX);
+    *chn = dev->find_channel("voltage" + itos(chid), d == TX);
 	if (!*chn)
-		*chn = dev->find_channel(get_ch_name("altvoltage", chid), d == TX);
+		*chn = dev->find_channel("altvoltage" + itos(chid), d == TX);
 	return *chn != NULL;
 }
 
 /* finds AD9361 phy IIO configuration channel with id chid */
 static bool get_phy_chan(Context *ctx, enum iodev d, int chid, Channel **chn)
 {
-	switch (d) {
-	case RX: *chn = get_ad9361_phy(ctx)->find_channel(get_ch_name("voltage", chid), false); return *chn != NULL;
-	case TX: *chn = get_ad9361_phy(ctx)->find_channel(get_ch_name("voltage", chid), true);  return *chn != NULL;
+    switch (d) {
+	case RX: *chn = ctx->devices["ad9361-phy"]->in["voltage" + itos(chid)]; return *chn != NULL;
+	case TX: *chn = ctx->devices["ad9361-phy"]->out["voltage" + itos(chid)];  return *chn != NULL;
 	default: ASSERT(0); return false;
 	}
 }
@@ -155,8 +131,8 @@ static bool get_lo_chan(Context *ctx, enum iodev d, Channel **chn)
 {
 	switch (d) {
 	 // LO chan is always output, i.e. true
-	case RX: *chn = get_ad9361_phy(ctx)->find_channel(get_ch_name("altvoltage", 0), true); return *chn != NULL;
-	case TX: *chn = get_ad9361_phy(ctx)->find_channel(get_ch_name("altvoltage", 1), true); return *chn != NULL;
+	case RX: *chn = ctx->devices["ad9361-phy"]->out["altvoltage0"]; return *chn != NULL;
+	case TX: *chn = ctx->devices["ad9361-phy"]->out["altvoltage1"]; return *chn != NULL;
 	default: ASSERT(0); return false;
 	}
 }
@@ -169,15 +145,15 @@ bool cfg_ad9361_streaming_ch(Context *ctx, struct stream_cfg *cfg, enum iodev ty
 	// Configure phy and lo channels
 	printf("* Acquiring AD9361 phy channel %d\n", chid);
 	if (!get_phy_chan(ctx, type, chid, &chn)) {	return false; }
-	wr_ch_str(chn, "rf_port_select",     cfg->rfport);
+	chn->attributes["rf_port_select"] = cfg->rfport;
 	//wr_ch_lli(chn, "hardwaregain",     cfg->x);
-	wr_ch_lli(chn, "rf_bandwidth",       cfg->bw_hz);
-	wr_ch_lli(chn, "sampling_frequency", cfg->fs_hz);
+    chn->attributes["rf_bandwidth"] = cfg->bw_hz;
+	chn->attributes["sampling_frequency"] = cfg->fs_hz;
 
 	// Configure LO channel
 	printf("* Acquiring AD9361 %s lo channel\n", type == TX ? "TX" : "RX");
 	if (!get_lo_chan(ctx, type, &chn)) { return false; }
-	wr_ch_lli(chn, "frequency", cfg->lo_hz);
+	chn->attributes["frequency"] = cfg->lo_hz;
 	return true;
 }
 
@@ -241,12 +217,12 @@ int main (int argc, char **argv)
 	rxbuf = new Buffer(rx, 1024*1024, false);
 	if (!rxbuf) {
 		perror("Could not create RX buffer");
-		shutdown();
+		exit(0);
 	}
 	txbuf = new Buffer(tx, 1024*1024, false);
 	if (!txbuf) {
 		perror("Could not create TX buffer");
-		shutdown();
+		exit(0);
 	}
 
 	printf("* Starting IO streaming (press CTRL+C to cancel)\n");
@@ -254,16 +230,15 @@ int main (int argc, char **argv)
 	while (!stop)
 	{
 		ssize_t nbytes_rx, nbytes_tx;
-		char *p_dat, *p_end, *t_dat, *t_end;
 		ptrdiff_t p_inc;
 		ptrdiff_t t_inc;
 		// Schedule TX buffer
 		nbytes_tx = txbuf->push();
-		if (nbytes_tx < 0) { printf("Error pushing buf %d\n", (int) nbytes_tx); shutdown(); }
+		if (nbytes_tx < 0) { printf("Error pushing buf %d\n", (int) nbytes_tx); exit(0); }
 
 		// Refill RX buffer
 		//nbytes_rx = iio_buffer_refill(rxbuf);
-		//if (nbytes_rx < 0) { printf("Error refilling buf %d\n",(int) nbytes_rx); shutdown(); }
+		//if (nbytes_rx < 0) { printf("Error refilling buf %d\n",(int) nbytes_rx); exit(0); }
 
 		// READ: Get pointers to RX buf and read IQ from RX buf port 0
 		double noise = 0;
@@ -283,9 +258,6 @@ int main (int argc, char **argv)
 		ntx += nbytes_tx / rx->sample_size();
 		printf("\tRX %8.2f MSmp, TX %8.2f MSmp\n", nrx/1e6, ntx/1e6);
 	}
-
-	shutdown();
-
 	return 0;
 }
 
