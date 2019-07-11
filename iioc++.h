@@ -14,6 +14,52 @@ class Device_Attributes;
 class Channel_Attributes;
 class Context_Devices;
 
+class Device_Attribute {
+    Device *dev;
+public:
+    std::string key;
+    Device_Attribute (std::string str, Device *device) {
+        key = str;
+        dev = device;
+    }
+    Device_Attribute& operator =(std::string str);
+    Device_Attribute& operator =(long long str);
+    Device_Attribute& operator =(double str);
+    Device_Attribute& operator =(bool str);
+    Device_Attribute& operator =(Device_Attribute d);
+    bool operator ==(Device_Attribute d);
+    std::string value();
+};
+
+class Device_Attributes {
+    Device* a;
+public:
+    Device_Attributes(Device* b) {
+        a = b;
+    }
+    int size();
+    std::string operator[] (unsigned int i);
+    Device_Attribute operator[] (std::string& s);
+};
+
+class Device {
+    iio_device *dev;
+public:
+    friend Buffer;
+    friend Device_Attributes;
+    friend Device_Attribute;
+    Device_Attributes attributes;
+    Device(iio_device* device) : attributes(this) {
+        dev = device;
+    }
+    size_t sample_size() {
+        return iio_device_get_sample_size(dev);
+    }
+    std::string id();
+    std::string name();
+    Channel* find_channel(std::string s, bool output);
+};
+
 class Buffer {
     iio_buffer* a;
     std::vector<std::complex<int16_t>> v;
@@ -22,8 +68,8 @@ public:
         return iio_buffer_step(a);
     }
 
-    Buffer(const struct iio_device *dev, size_t samples_count = 1024*1024, bool cyclic = false) {
-        a = iio_device_create_buffer(dev, samples_count, cyclic);
+    Buffer(Device *dev, size_t samples_count = 1024*1024, bool cyclic = false) {
+        a = iio_device_create_buffer(dev->dev, samples_count, cyclic);
         int i = 0;
         for (auto t_dat = (char *)iio_buffer_first(a, NULL); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
 		    v.push_back(std::complex<int16_t>());
@@ -81,49 +127,6 @@ public:
 		}
         return ret;
     }
-};
-
-class Device_Attribute {
-    Device *dev;
-public:
-    std::string key;
-    Device_Attribute (std::string str, Device *device) {
-        key = str;
-        dev = device;
-    }
-    Device_Attribute& operator =(std::string str);
-    Device_Attribute& operator =(long long str);
-    Device_Attribute& operator =(double str);
-    Device_Attribute& operator =(bool str);
-    Device_Attribute& operator =(Device_Attribute d);
-    bool operator ==(Device_Attribute d);
-    std::string value();
-};
-
-class Device_Attributes {
-    Device* a;
-public:
-    Device_Attributes(Device* b) {
-        a = b;
-    }
-    int size();
-    std::string operator[] (unsigned int i);
-    Device_Attribute operator[] (std::string& s);
-};
-
-
-class Device {
-    iio_device *dev;
-public:
-    friend Device_Attributes;
-    friend Device_Attribute;
-    Device_Attributes attributes;
-    Device(iio_device* device) : attributes(this) {
-        dev = device;
-    }
-    std::string id();
-    std::string name();
-    Channel* find_channel(std::string s, bool output);
 };
 
 class Context_Devices {
@@ -232,6 +235,10 @@ public:
 
     std::string id() {
         return std::string(iio_channel_get_id(a));
+    }
+
+    void enable() {
+        iio_channel_enable(a);
     }
 
     void disable() {

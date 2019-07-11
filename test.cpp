@@ -134,9 +134,9 @@ static bool get_ad9361_stream_dev(Context *ctx, enum iodev d, Device **dev)
 /* finds AD9361 streaming IIO channels */
 static bool get_ad9361_stream_ch(Context *ctx, enum iodev d, Device *dev, int chid, Channel **chn)
 {
-	*chn = iio_device_find_channel(dev, get_ch_name("voltage", chid), d == TX);
+	*chn = dev->find_channel(get_ch_name("voltage", chid), d == TX);
 	if (!*chn)
-		*chn = iio_device_find_channel(dev, get_ch_name("altvoltage", chid), d == TX);
+		*chn = dev->find_channel(get_ch_name("altvoltage", chid), d == TX);
 	return *chn != NULL;
 }
 
@@ -232,10 +232,10 @@ int main (int argc, char **argv)
 	ASSERT(get_ad9361_stream_ch(ctx, TX, tx, 1, &tx0_q) && "TX chan q not found");
 
 	printf("* Enabling IIO streaming channels\n");
-	iio_channel_enable(rx0_i);
-	iio_channel_enable(rx0_q);
-	iio_channel_enable(tx0_i);
-	iio_channel_enable(tx0_q);
+    rx0_i->enable();
+	rx0_q->enable();
+	tx0_i->enable();
+	tx0_q->enable();
 
 	printf("* Creating non-cyclic IIO buffers with 1 MiS\n");
 	rxbuf = new Buffer(rx, 1024*1024, false);
@@ -277,10 +277,10 @@ int main (int argc, char **argv)
 			*i = std::complex<int16_t>((int)(cos(a / 400.) * 32767/16), (int)(sin(a / 400.) * 32767 /16));
 			a++;
         }
-		printf("\tnoise - %f\n", sqrt(noise / (nbytes_rx / iio_device_get_sample_size(rx))));
+		printf("\tnoise - %f\n", sqrt(noise / (nbytes_rx / rx->sample_size())));
 		// Sample counter increment and status output
-		nrx += nbytes_rx / iio_device_get_sample_size(rx);
-		ntx += nbytes_tx / iio_device_get_sample_size(tx);
+		nrx += nbytes_rx / rx->sample_size();
+		ntx += nbytes_tx / rx->sample_size();
 		printf("\tRX %8.2f MSmp, TX %8.2f MSmp\n", nrx/1e6, ntx/1e6);
 	}
 
