@@ -22,6 +22,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <math.h>
+#include <chrono>
 
 #include <iostream>
 
@@ -160,6 +161,7 @@ bool cfg_ad9361_streaming_ch(Context *ctx, struct stream_cfg *cfg, enum iodev ty
 /* simple configuration and streaming */
 int main (int argc, char **argv)
 {
+    std::chrono::time_point<std::chrono::system_clock> start, end;
 	// Streaming devices
 	Device *tx;
 	Device *rx;
@@ -252,11 +254,13 @@ int main (int argc, char **argv)
 			*i = std::complex<int16_t>((int)(cos(a / 400.) * 32767/16), (int)(sin(a / 400.) * 32767 /16));
 			a++;
         }
+        end = std::chrono::system_clock::now();
+		double seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start).count();
 		printf("\tnoise - %f\n", sqrt(noise / (nbytes_rx / rx->sample_size())));
 		// Sample counter increment and status output
 		nrx += nbytes_rx / rx->sample_size();
 		ntx += nbytes_tx / rx->sample_size();
-		printf("\tRX %8.2f MSmp, TX %8.2f MSmp\n", nrx/1e6, ntx/1e6);
+		std::cout << "\tRX" << (1. * nrx/1e6) << ' ' << seconds <<" MSmp, TX " << (1. * ntx/1e6) / seconds << " MSmp\n";
 	}
 	return 0;
 }
