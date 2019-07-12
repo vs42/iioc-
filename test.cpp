@@ -39,18 +39,6 @@
 /* RX is input, TX is output */
 enum iodev { RX, TX };
 
-/* common RX and TX streaming params */
-struct stream_cfg {
-	long long bw_hz; // Analog banwidth in Hz
-	long long fs_hz; // Baseband sample rate in Hz
-	long long lo_hz; // Local oscillator frequency in Hz
-	const char* rfport; // Port name
-	long long x;
-};
-
-/* static scratch mem for strings */
-static char tmpstr[64];
-
 /* IIO structs required for streaming */
 Context *ctx   = NULL;
 Channel *rx0_i = NULL;
@@ -79,26 +67,8 @@ int main (int argc, char **argv)
 	size_t nrx = 0;
 	size_t ntx = 0;
 
-	// Stream configurations
-	struct stream_cfg rxcfg;
-	struct stream_cfg txcfg;
-
 	// Listen to ctrl+c and ASSERT
 	signal(SIGINT, handle_sig);
-
-	// RX stream config
-	rxcfg.bw_hz = MHZ(2);   // 2 MHz rf bandwidth
-	rxcfg.fs_hz = MHZ(2.5);   // 2.5 MS/s rx sample rate
-	rxcfg.lo_hz = GHZ(2.4); // 2.5 GHz rf frequency
-	rxcfg.x = 71;
-	rxcfg.rfport = "A_BALANCED"; // port A (select for rf freq.)
-
-	// TX stream config
-	txcfg.bw_hz = MHZ(1.5); // 1.5 MHz rf bandwidth
-	txcfg.fs_hz = MHZ(2.5);   // 2.5 MS/s tx sample rate
-	txcfg.lo_hz = MHZ(434.15);   // 2.5 GHz rf frequency
-	txcfg.x = -10;
-	txcfg.rfport = "A"; // port A (select for rf freq.)
 
 	printf("* Acquiring IIO context\n");
 	ctx = new Context("network", "192.168.2.1");
@@ -110,28 +80,30 @@ int main (int argc, char **argv)
 	rx = ctx->devices["cf-ad9361-lpc"];
 
 	printf("* Configuring AD9361 for streaming\n");
-	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_port_select"] = rxcfg.rfport;
-	//wr_ch_lli(chn, "hardwaregain",     cfg->x);
-    ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_bandwidth"] = rxcfg.bw_hz;
-	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["sampling_frequency"] = rxcfg.fs_hz;
-	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_port_select"] = txcfg.rfport;
-	//wr_ch_lli(chn, "hardwaregain",     cfg->x);
-    ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_bandwidth"] = txcfg.bw_hz;
-	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["sampling_frequency"] = txcfg.fs_hz;
+	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_port_select"] = "A_BALANCED";
+	//wr_ch_lli(chn, "hardwaregain",     71);
+    ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_bandwidth"] = MHZ(2);
+	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["sampling_frequency"] = MHZ(2.5);
+
+
+	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_port_select"] = "A";
+	//wr_ch_lli(chn, "hardwaregain",     10);
+    ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_bandwidth"] = MHZ(1.5);
+	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["sampling_frequency"] = MHZ(2.5);
 
 	printf("* Initializing AD9361 IIO streaming channels\n");
-	rx0_i = rx->find_channel("voltage0", 0);
+	rx0_i = rx->in["voltage0"];
 	if (!rx0_i)
-		rx0_i = rx->find_channel("altvoltage0", 0);
-	rx0_q = rx->find_channel("voltage1", 0);
+		rx0_i = rx->in["altvoltage0"];
+	rx0_q = rx->in["voltage1"];
 	if (!rx0_q)
-		rx0_q = rx->find_channel("altvoltage1", 0);
-	tx0_i = tx->find_channel("voltage0", 1);
+		rx0_q = rx->in["altvoltage1"];
+	tx0_i = tx->out["voltage0"];
 	if (!tx0_i)
-		tx0_i = tx->find_channel("altvoltage0", 1);
-	tx0_q = tx->find_channel("voltage1", 1);
+		tx0_i = tx->out["altvoltage0"];
+	tx0_q = tx->out["voltage1"];
 	if (!tx0_q)
-		tx0_q = tx->find_channel("altvoltage1", 1);
+		tx0_q = tx->out["altvoltage1"];
 
 	printf("* Enabling IIO streaming channels\n");
     rx0_i->enable();
@@ -164,7 +136,7 @@ int main (int argc, char **argv)
 		if (nbytes_tx < 0) { printf("Error pushing buf %d\n", (int) nbytes_tx); exit(0); }
 
 		// Refill RX buffer
-		//nbytes_rx = iio_buffer_refill(rxbuf);
+		//nbytes_rx = rxbuf->refill();
 		//if (nbytes_rx < 0) { printf("Error refilling buf %d\n",(int) nbytes_rx); exit(0); }
 
 		// READ: Get pointers to RX buf and read IQ from RX buf port 0
@@ -184,7 +156,7 @@ int main (int argc, char **argv)
 		printf("\tnoise - %f\n", sqrt(noise / (nbytes_rx / rx->sample_size())));
 		// Sample counter increment and status output
 		nrx += nbytes_rx / rx->sample_size();
-		ntx += nbytes_tx / rx->sample_size();
+		ntx += nbytes_tx / tx->sample_size();
 		std::cout << "\tRX " << (1. * nrx/1e6) / seconds <<" MSmp, TX " << (1. * ntx/1e6) / seconds << " MSmp\n";
 	}
 	return 0;
