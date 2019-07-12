@@ -36,13 +36,6 @@
 #define MHZ(x) ((long long)(x*1000000.0 + .5))
 #define GHZ(x) ((long long)(x*1000000000.0 + .5))
 
-#define ASSERT(expr) { \
-	if (!(expr)) { \
-		(void) fprintf(stderr, "assertion failed (%s:%d)\n", __FILE__, __LINE__); \
-		(void) abort(); \
-	} \
-}
-
 /* RX is input, TX is output */
 enum iodev { RX, TX };
 
@@ -75,90 +68,6 @@ static void handle_sig(int sig)
 	stop = true;
 }
 
-/* check return value of attr_write function */
-static void errchk(int v, const char* what) {
-	 if (v < 0) { fprintf(stderr, "Error %d writing to channel \"%s\"\nvalue may not be supported.\n", v, what); exit(0); }
-}
-
-std::string itos (int n) {
-    if (n == 0) {
-        return "0";
-    }
-    int d = 1;
-    while (d <= n) {
-        d *= 10;
-    }
-    d /= 10;
-    std::string s;
-    while (d > 0) {
-        s += '0' + (n / d);
-        n %= d;
-        d /= 10;
-    }
-    return s;
-}
-
-/* finds AD9361 streaming IIO devices */
-static bool get_ad9361_stream_dev(Context *ctx, enum iodev d, Device **dev)
-{
-	switch (d) {
-	case TX: *dev = ctx->devices["cf-ad9361-dds-core-lpc"]; return *dev != NULL;
-	case RX: *dev = ctx->devices["cf-ad9361-lpc"];  return *dev != NULL;
-	default: ASSERT(0); return false;
-	}
-}
-
-/* finds AD9361 streaming IIO channels */
-static bool get_ad9361_stream_ch(Context *ctx, enum iodev d, Device *dev, int chid, Channel **chn)
-{
-    *chn = dev->find_channel("voltage" + itos(chid), d == TX);
-	if (!*chn)
-		*chn = dev->find_channel("altvoltage" + itos(chid), d == TX);
-	return *chn != NULL;
-}
-
-/* finds AD9361 phy IIO configuration channel with id chid */
-static bool get_phy_chan(Context *ctx, enum iodev d, int chid, Channel **chn)
-{
-    switch (d) {
-	case RX: *chn = ctx->devices["ad9361-phy"]->in["voltage" + itos(chid)]; return *chn != NULL;
-	case TX: *chn = ctx->devices["ad9361-phy"]->out["voltage" + itos(chid)];  return *chn != NULL;
-	default: ASSERT(0); return false;
-	}
-}
-
-/* finds AD9361 local oscillator IIO configuration channels */
-static bool get_lo_chan(Context *ctx, enum iodev d, Channel **chn)
-{
-	switch (d) {
-	 // LO chan is always output, i.e. true
-	case RX: *chn = ctx->devices["ad9361-phy"]->out["altvoltage0"]; return *chn != NULL;
-	case TX: *chn = ctx->devices["ad9361-phy"]->out["altvoltage1"]; return *chn != NULL;
-	default: ASSERT(0); return false;
-	}
-}
-
-/* applies streaming configuration through IIO */
-bool cfg_ad9361_streaming_ch(Context *ctx, struct stream_cfg *cfg, enum iodev type, int chid)
-{
-	Channel *chn = NULL;
-
-	// Configure phy and lo channels
-	printf("* Acquiring AD9361 phy channel %d\n", chid);
-	if (!get_phy_chan(ctx, type, chid, &chn)) {	return false; }
-	chn->attributes["rf_port_select"] = cfg->rfport;
-	//wr_ch_lli(chn, "hardwaregain",     cfg->x);
-    chn->attributes["rf_bandwidth"] = cfg->bw_hz;
-	chn->attributes["sampling_frequency"] = cfg->fs_hz;
-
-	// Configure LO channel
-	printf("* Acquiring AD9361 %s lo channel\n", type == TX ? "TX" : "RX");
-	if (!get_lo_chan(ctx, type, &chn)) { return false; }
-	chn->attributes["frequency"] = cfg->lo_hz;
-	return true;
-}
-
-/* simple configuration and streaming */
 int main (int argc, char **argv)
 {
     std::chrono::time_point<std::chrono::system_clock> start, end;
@@ -193,21 +102,36 @@ int main (int argc, char **argv)
 
 	printf("* Acquiring IIO context\n");
 	ctx = new Context("network", "192.168.2.1");
-	ASSERT(ctx->devices.size() > 0 && "No devices");
+	if(ctx->devices.size() == 0) {std::cout << "No devices" << std::endl;}
 
 	printf("* Acquiring AD9361 streaming devices\n");
-	ASSERT(get_ad9361_stream_dev(ctx, TX, &tx) && "No tx dev found");
-	ASSERT(get_ad9361_stream_dev(ctx, RX, &rx) && "No rx dev found");
+
+	tx = ctx->devices["cf-ad9361-dds-core-lpc"];
+	rx = ctx->devices["cf-ad9361-lpc"];
 
 	printf("* Configuring AD9361 for streaming\n");
-	ASSERT(cfg_ad9361_streaming_ch(ctx, &rxcfg, RX, 0) && "RX port 0 not found");
-	ASSERT(cfg_ad9361_streaming_ch(ctx, &txcfg, TX, 0) && "TX port 0 not found");
+	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_port_select"] = rxcfg.rfport;
+	//wr_ch_lli(chn, "hardwaregain",     cfg->x);
+    ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_bandwidth"] = rxcfg.bw_hz;
+	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["sampling_frequency"] = rxcfg.fs_hz;
+	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_port_select"] = txcfg.rfport;
+	//wr_ch_lli(chn, "hardwaregain",     cfg->x);
+    ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_bandwidth"] = txcfg.bw_hz;
+	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["sampling_frequency"] = txcfg.fs_hz;
 
 	printf("* Initializing AD9361 IIO streaming channels\n");
-	ASSERT(get_ad9361_stream_ch(ctx, RX, rx, 0, &rx0_i) && "RX chan i not found");
-	ASSERT(get_ad9361_stream_ch(ctx, RX, rx, 1, &rx0_q) && "RX chan q not found");
-	ASSERT(get_ad9361_stream_ch(ctx, TX, tx, 0, &tx0_i) && "TX chan i not found");
-	ASSERT(get_ad9361_stream_ch(ctx, TX, tx, 1, &tx0_q) && "TX chan q not found");
+	rx0_i = rx->find_channel("voltage0", 0);
+	if (!rx0_i)
+		rx0_i = rx->find_channel("altvoltage0", 0);
+	rx0_q = rx->find_channel("voltage1", 0);
+	if (!rx0_q)
+		rx0_q = rx->find_channel("altvoltage1", 0);
+	tx0_i = tx->find_channel("voltage0", 1);
+	if (!tx0_i)
+		tx0_i = tx->find_channel("altvoltage0", 1);
+	tx0_q = tx->find_channel("voltage1", 1);
+	if (!tx0_q)
+		tx0_q = tx->find_channel("altvoltage1", 1);
 
 	printf("* Enabling IIO streaming channels\n");
     rx0_i->enable();
@@ -229,6 +153,7 @@ int main (int argc, char **argv)
 
 	printf("* Starting IO streaming (press CTRL+C to cancel)\n");
 	int a = 0;
+	start = std::chrono::system_clock::now();
 	while (!stop)
 	{
 		ssize_t nbytes_rx, nbytes_tx;
@@ -260,7 +185,7 @@ int main (int argc, char **argv)
 		// Sample counter increment and status output
 		nrx += nbytes_rx / rx->sample_size();
 		ntx += nbytes_tx / rx->sample_size();
-		std::cout << "\tRX" << (1. * nrx/1e6) << ' ' << seconds <<" MSmp, TX " << (1. * ntx/1e6) / seconds << " MSmp\n";
+		std::cout << "\tRX " << (1. * nrx/1e6) / seconds <<" MSmp, TX " << (1. * ntx/1e6) / seconds << " MSmp\n";
 	}
 	return 0;
 }
