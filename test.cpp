@@ -40,14 +40,6 @@
 enum iodev { RX, TX };
 
 /* IIO structs required for streaming */
-Context *ctx   = NULL;
-Channel *rx0_i = NULL;
-Channel *rx0_q = NULL;
-Channel *tx0_i = NULL;
-Channel *tx0_q = NULL;
-Buffer  *rxbuf = NULL;
-Buffer  *txbuf = NULL;
-
 static bool stop;
 
 static void handle_sig(int sig)
@@ -59,10 +51,6 @@ static void handle_sig(int sig)
 int main (int argc, char **argv)
 {
     std::chrono::time_point<std::chrono::system_clock> start, end;
-	// Streaming devices
-	Device *tx;
-	Device *rx;
-
 	// RX and TX sample counters
 	size_t nrx = 0;
 	size_t ntx = 0;
@@ -71,57 +59,41 @@ int main (int argc, char **argv)
 	signal(SIGINT, handle_sig);
 
 	printf("* Acquiring IIO context\n");
-	ctx = new Context("network", "192.168.2.1");
-	if(ctx->devices.size() == 0) {std::cout << "No devices" << std::endl;}
+	Context ctx("network", "192.168.2.1");
+	if(ctx.devices.size() == 0) {std::cout << "No devices" << std::endl;}
 
 	printf("* Acquiring AD9361 streaming devices\n");
 
-	tx = ctx->devices["cf-ad9361-dds-core-lpc"];
-	rx = ctx->devices["cf-ad9361-lpc"];
+	Device tx = ctx.devices["cf-ad9361-dds-core-lpc"];
+	Device rx = ctx.devices["cf-ad9361-lpc"];
 
 	printf("* Configuring AD9361 for streaming\n");
-	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_port_select"] = "A_BALANCED";
+	ctx.devices["ad9361-phy"].in["voltage0"].attributes["rf_port_select"] = "A_BALANCED";
 	//wr_ch_lli(chn, "hardwaregain",     71);
-    ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["rf_bandwidth"] = MHZ(2);
-	ctx->devices["ad9361-phy"]->in["voltage0"]->attributes["sampling_frequency"] = MHZ(2.5);
+    ctx.devices["ad9361-phy"].in["voltage0"].attributes["rf_bandwidth"] = MHZ(2);
+	ctx.devices["ad9361-phy"].in["voltage0"].attributes["sampling_frequency"] = MHZ(2.5);
 
 
-	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_port_select"] = "A";
+	ctx.devices["ad9361-phy"].out["voltage0"].attributes["rf_port_select"] = "A";
 	//wr_ch_lli(chn, "hardwaregain",     10);
-    ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["rf_bandwidth"] = MHZ(1.5);
-	ctx->devices["ad9361-phy"]->out["voltage0"]->attributes["sampling_frequency"] = MHZ(2.5);
+    ctx.devices["ad9361-phy"].out["voltage0"].attributes["rf_bandwidth"] = MHZ(1.5);
+	ctx.devices["ad9361-phy"].out["voltage0"].attributes["sampling_frequency"] = MHZ(2.5);
 
 	printf("* Initializing AD9361 IIO streaming channels\n");
-	rx0_i = rx->in["voltage0"];
-	if (!rx0_i)
-		rx0_i = rx->in["altvoltage0"];
-	rx0_q = rx->in["voltage1"];
-	if (!rx0_q)
-		rx0_q = rx->in["altvoltage1"];
-	tx0_i = tx->out["voltage0"];
-	if (!tx0_i)
-		tx0_i = tx->out["altvoltage0"];
-	tx0_q = tx->out["voltage1"];
-	if (!tx0_q)
-		tx0_q = tx->out["altvoltage1"];
+	Channel rx0_i = rx.in["voltage0"];
+	Channel rx0_q = rx.in["voltage1"];
+	Channel tx0_i = tx.out["voltage0"];
+	Channel tx0_q = tx.out["voltage1"];
 
 	printf("* Enabling IIO streaming channels\n");
-    rx0_i->enable();
-	rx0_q->enable();
-	tx0_i->enable();
-	tx0_q->enable();
+    rx0_i.enable();
+	rx0_q.enable();
+	tx0_i.enable();
+	tx0_q.enable();
 
 	printf("* Creating non-cyclic IIO buffers with 1 MiS\n");
-	rxbuf = new Buffer(rx, 1024*1024, false);
-	if (!rxbuf) {
-		perror("Could not create RX buffer");
-		exit(0);
-	}
-	txbuf = new Buffer(tx, 1024*1024, false);
-	if (!txbuf) {
-		perror("Could not create TX buffer");
-		exit(0);
-	}
+	Buffer rxbuf(rx, 1024*1024, false);
+	Buffer txbuf(tx, 1024*1024, false);
 
 	printf("* Starting IO streaming (press CTRL+C to cancel)\n");
 	int a = 0;
@@ -132,31 +104,31 @@ int main (int argc, char **argv)
 		ptrdiff_t p_inc;
 		ptrdiff_t t_inc;
 		// Schedule TX buffer
-		nbytes_tx = txbuf->push();
+		nbytes_tx = txbuf.push();
 		if (nbytes_tx < 0) { printf("Error pushing buf %d\n", (int) nbytes_tx); exit(0); }
 
 		// Refill RX buffer
-		//nbytes_rx = rxbuf->refill();
+		//nbytes_rx = rxbuf.refill();
 		//if (nbytes_rx < 0) { printf("Error refilling buf %d\n",(int) nbytes_rx); exit(0); }
 
 		// READ: Get pointers to RX buf and read IQ from RX buf port 0
 		double noise = 0;
-		auto j = txbuf->begin();
-		for (auto i = rxbuf->begin(); !(i == rxbuf->end()); ++i) {
+		auto j = txbuf.begin();
+		for (auto i = rxbuf.begin(); !(i == rxbuf.end()); ++i) {
 			noise += pow(((*i).imag() - (*j).imag()), 2);
 			noise += pow(((*i).real() - (*j).real()), 2);
 			j++;
 		}
-		for (auto i = txbuf->begin(); !(i == txbuf->end()); ++i) {
+		for (auto i = txbuf.begin(); !(i == txbuf.end()); ++i) {
 			*i = std::complex<int16_t>((int)(cos(a / 400.) * 32767/16), (int)(sin(a / 400.) * 32767 /16));
 			a++;
         }
         end = std::chrono::system_clock::now();
 		double seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start).count();
-		printf("\tnoise - %f\n", sqrt(noise / (nbytes_rx / rx->sample_size())));
+		printf("\tnoise - %f\n", sqrt(noise / (nbytes_rx / rx.sample_size())));
 		// Sample counter increment and status output
-		nrx += nbytes_rx / rx->sample_size();
-		ntx += nbytes_tx / tx->sample_size();
+		nrx += nbytes_rx / rx.sample_size();
+		ntx += nbytes_tx / tx.sample_size();
 		std::cout << "\tRX " << (1. * nrx/1e6) / seconds <<" MSmp, TX " << (1. * ntx/1e6) / seconds << " MSmp\n";
 	}
 	return 0;

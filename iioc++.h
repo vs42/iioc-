@@ -4,6 +4,8 @@
 #include <string>
 #include <assert.h>
 
+const int MAXATRLENGTH = 128;
+
 class Buffer;
 class Device;
 class Context;
@@ -52,7 +54,7 @@ public:
         out = outc;
     }
     int size();
-    Channel* operator[] (std::string s);
+    Channel operator[] (std::string s);
 };
 
 class Device {
@@ -73,7 +75,7 @@ public:
     }
     std::string id();
     std::string name();
-    Channel* find_channel(std::string s, bool output);
+    Channel find_channel(std::string s, bool output);
 };
 
 class Buffer {
@@ -84,8 +86,8 @@ public:
         return iio_buffer_step(a);
     }
 
-    Buffer(Device *dev, size_t samples_count = 1024*1024, bool cyclic = false) {
-        a = iio_device_create_buffer(dev->dev, samples_count, cyclic);
+    Buffer(Device dev, size_t samples_count = 1024*1024, bool cyclic = false) {
+        a = iio_device_create_buffer(dev.dev, samples_count, cyclic);
         int i = 0;
         for (auto t_dat = (char *)iio_buffer_start(a); t_dat != iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
 		    v.push_back(std::complex<int16_t>());
@@ -152,8 +154,8 @@ public:
         a = b;
     }
     int size();
-    Device* operator[] (unsigned int i);
-    Device* operator[] (std::string s);
+    Device operator[] (unsigned int i);
+    Device operator[] (std::string s);
 };
 
 class Context {
@@ -277,14 +279,12 @@ int Context_Devices::size() {
     return iio_context_get_devices_count(a->a);
 }
 
-Device* Context_Devices::operator[] (unsigned int i) {
-    auto d = new Device(iio_context_get_device(a->a, i));
-    return d;
+Device Context_Devices::operator[] (unsigned int i) {
+    return Device(iio_context_get_device(a->a, i));
 }
 
-Device* Context_Devices::operator[] (std::string s) {
-    auto d = new Device(iio_context_find_device(a->a, s.c_str()));
-    return d;
+Device Context_Devices::operator[] (std::string s) {
+    return Device(iio_context_find_device(a->a, s.c_str()));
 }
 
 std::string Channel_Attributes::operator[] (unsigned int i) {
@@ -303,9 +303,8 @@ Device_Attribute Device_Attributes::operator[] (std::string s) {
     return Device_Attribute(s, a);
 }
 
-Channel* Device::find_channel(std::string s, bool output) {
-    auto c = new Channel(iio_device_find_channel(dev, s.c_str(), output));
-    return c;
+Channel Device::find_channel(std::string s, bool output) {
+    return Channel(iio_device_find_channel(dev, s.c_str(), output));
 }
 
 Device_Attribute& Device_Attribute::operator =(std::string str) {
@@ -333,11 +332,17 @@ Device_Attribute& Device_Attribute::operator =(Device_Attribute d) {
     return *this;
 }
 bool Device_Attribute::operator ==(Device_Attribute d) {
-    return iio_device_find_attr(dev->dev, key.c_str()) == iio_device_find_attr(d.dev->dev, d.key.c_str());
+    char tmp[MAXATRLENGTH];
+    iio_device_attr_read(dev->dev, key.c_str(), tmp, MAXATRLENGTH);
+    std::string s(tmp);
+    iio_device_attr_read(d.dev->dev, d.key.c_str(), tmp, MAXATRLENGTH);
+    std::string s1(tmp);
 }
 
 std::string Device_Attribute::value() {
-    return std::string(iio_device_find_attr(dev->dev, key.c_str()));
+    char tmp[MAXATRLENGTH];
+    iio_device_attr_read(dev->dev, key.c_str(), tmp, MAXATRLENGTH);
+    return std::string(tmp);
 }
 
 Channel_Attribute& Channel_Attribute::operator =(std::string str) {
@@ -365,15 +370,20 @@ Channel_Attribute& Channel_Attribute::operator =(Channel_Attribute d) {
     return *this;
 }
 bool Channel_Attribute::operator ==(Channel_Attribute d) {
-    return iio_channel_find_attr(dev->a, key.c_str()) == iio_channel_find_attr(d.dev->a, d.key.c_str());
+    char tmp[MAXATRLENGTH];
+    iio_channel_attr_read(dev->a, key.c_str(), tmp, MAXATRLENGTH);
+    std::string s(tmp);
+    iio_channel_attr_read(d.dev->a, d.key.c_str(), tmp, MAXATRLENGTH);
+    std::string s1(tmp);
+    return s == s1;
 }
 
 std::string Channel_Attribute::value() {
-    return std::string(iio_channel_find_attr(dev->a, key.c_str()));
+    char tmp[MAXATRLENGTH];
+    iio_channel_attr_read(dev->a, key.c_str(), tmp, MAXATRLENGTH);
+    return std::string(tmp);
 }
 
-Channel* Device_Channels::operator[] (std::string s) {
-    Channel* ret;
-    ret = new Channel(iio_device_find_channel(a->dev, s.c_str(), out));
-    return ret;
+Channel Device_Channels::operator[] (std::string s) {
+    return Channel(iio_device_find_channel(a->dev, s.c_str(), out));
 }
