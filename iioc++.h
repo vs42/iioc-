@@ -2,9 +2,27 @@
 #include <complex>
 #include <vector>
 #include <string>
-#include <assert.h>
+#include <cassert>
+#include <cerrno>
 
 const int MAXATRLENGTH = 128;
+namespace Hz{
+    long long operator"" _MHz(unsigned long long x) {
+        return ((long long)x*1000000.0 + .5);
+    }
+
+    long long operator"" _GHz(unsigned long long x) {
+        return ((long long)x*1000000000.0 + .5);
+    }
+
+    long long operator"" _MHz(long double x) {
+        return (x*1000000.0 + .5);
+    }
+
+    long long operator"" _GHz(long double x) {
+        return (x*1000000000.0 + .5);
+    }
+}
 
 class Buffer;
 class Device;
@@ -25,12 +43,11 @@ public:
         key = str;
         dev = device;
     }
-    Device_Attribute& operator =(std::string str);
+    Device_Attribute& operator =(std::string const& str);
+    Device_Attribute& operator =(const char* str);
     Device_Attribute& operator =(long long str);
     Device_Attribute& operator =(double str);
     Device_Attribute& operator =(bool str);
-    Device_Attribute& operator =(Device_Attribute d);
-    bool operator ==(Device_Attribute d);
     std::string value();
 };
 
@@ -86,11 +103,16 @@ public:
         return iio_buffer_step(a);
     }
 
-    Buffer(Device dev, size_t samples_count = 1024*1024, bool cyclic = false) {
-        a = iio_device_create_buffer(dev.dev, samples_count, cyclic);
+    Buffer(Device dev, size_t samples_count = 1024*1024, bool cyclic = false) 
+        : v(samples_count)
+    {
+        if ((a = iio_device_create_buffer(dev.dev, samples_count, cyclic)) == nullptr) {
+            throw std::system_error{errno, std::generic_category(), "buffer not created"};
+        }
+        
         int i = 0;
-        for (auto t_dat = (char *)iio_buffer_start(a); t_dat != iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
-		    v.push_back(std::complex<int16_t>());
+        for (auto t_dat = (char *)iio_buffer_start(a); t_dat < iio_buffer_end(a); t_dat += iio_buffer_step(a)) {
+		    //v.push_back(std::complex<int16_t>());
 			v[i] = std::complex<int16_t>(((int16_t*)t_dat)[1], ((int16_t*)t_dat)[0]);
 			i++;
 		}
@@ -100,6 +122,13 @@ public:
     void destroy() {
         v.clear();
         iio_buffer_destroy(a);
+    }
+
+    void set_blocking_mode(bool x) {
+        int err;
+        if ((err = iio_buffer_set_blocking_mode(a, x)) < 0) {
+            throw std::system_error{-err, std::generic_category(), "blocking mode changing error"};
+        }
     }
 
     ~Buffer() {
@@ -129,6 +158,7 @@ public:
 			((int16_t*)t_dat)[1] = v[i].real();
 			i++;
 		}
+        int err = 0;
         if (samples_count == 0) {
             return iio_buffer_push(a);
         } else {
@@ -216,12 +246,11 @@ public:
         key = str;
         dev = device;
     }
-    Channel_Attribute& operator =(std::string str);
+    Channel_Attribute& operator =(std::string const& str);
+    Channel_Attribute& operator =(const char* str);
     Channel_Attribute& operator =(long long str);
     Channel_Attribute& operator =(double str);
     Channel_Attribute& operator =(bool str);
-    Channel_Attribute& operator =(Channel_Attribute d);
-    bool operator ==(Channel_Attribute d);
     std::string value();
 };
 
@@ -243,8 +272,7 @@ public:
     friend Channel_Attribute;
     Channel_Attributes attributes;
 
-    Channel (iio_channel *b) : attributes(this) {
-        a = b;
+    Channel (iio_channel *b) : a(b), attributes(this) {
     }
 
     std::string name() {
@@ -261,9 +289,6 @@ public:
 
     void disable() {
         iio_channel_disable(a);
-    }
-    ~Channel() {
-        this->disable();
     }
 };
 
@@ -307,36 +332,44 @@ Channel Device::find_channel(std::string s, bool output) {
     return Channel(iio_device_find_channel(dev, s.c_str(), output));
 }
 
-Device_Attribute& Device_Attribute::operator =(std::string str) {
-    iio_device_attr_write(dev->dev, key.c_str(), str.c_str());
+Device_Attribute& Device_Attribute::operator =(std::string const& str) {
+    int err;
+    if((err = iio_device_attr_write(dev->dev, key.c_str(), str.c_str())) < 0) {
+        throw std::system_error{-err, std::generic_category(), "device attribute write error"};
+    }
+    return *this;
+}
+
+Device_Attribute& Device_Attribute::operator =(const char* str) {
+    int err;
+    if((err = iio_device_attr_write(dev->dev, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "device attribute write error"};
+    }
     return *this;
 }
 
 Device_Attribute& Device_Attribute::operator = (long long str){
-    iio_device_attr_write_longlong(dev->dev, key.c_str(), str);
+    int err;
+    if((err = iio_device_attr_write_longlong(dev->dev, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "device attribute write error"};
+    }
     return *this;
 }
 
 Device_Attribute& Device_Attribute::operator = (bool str){
-    iio_device_attr_write_bool(dev->dev, key.c_str(), str);
+    int err;
+    if ((err = iio_device_attr_write_bool(dev->dev, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "device attribute write error"};
+    }
     return *this;
 }
 
 Device_Attribute& Device_Attribute::operator = (double str){
-    iio_device_attr_write_double(dev->dev, key.c_str(), str);
+    int err;
+    if ((err = iio_device_attr_write_double(dev->dev, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "device attribute write error"};
+    }
     return *this;
-}
-
-Device_Attribute& Device_Attribute::operator =(Device_Attribute d) {
-    iio_device_attr_write(dev->dev, key.c_str(), iio_device_find_attr(d.dev->dev, d.key.c_str()));
-    return *this;
-}
-bool Device_Attribute::operator ==(Device_Attribute d) {
-    char tmp[MAXATRLENGTH];
-    iio_device_attr_read(dev->dev, key.c_str(), tmp, MAXATRLENGTH);
-    std::string s(tmp);
-    iio_device_attr_read(d.dev->dev, d.key.c_str(), tmp, MAXATRLENGTH);
-    std::string s1(tmp);
 }
 
 std::string Device_Attribute::value() {
@@ -345,37 +378,44 @@ std::string Device_Attribute::value() {
     return std::string(tmp);
 }
 
-Channel_Attribute& Channel_Attribute::operator =(std::string str) {
-    iio_channel_attr_write(dev->a, key.c_str(), str.c_str());
+Channel_Attribute& Channel_Attribute::operator =(std::string const& str) {
+    int err;
+    if ((err = iio_channel_attr_write(dev->a, key.c_str(), str.c_str())) < 0) {
+        throw std::system_error{-err, std::generic_category(), "channel attribute write error"};
+    }
+    return *this;
+}
+
+Channel_Attribute& Channel_Attribute::operator =(const char* str) {
+    int err;
+    if ((err = iio_channel_attr_write(dev->a, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "channel attribute write error"};
+    }
     return *this;
 }
 
 Channel_Attribute& Channel_Attribute::operator = (long long str){
-    iio_channel_attr_write_longlong(dev->a, key.c_str(), str);
+    int err;
+    if ((err = iio_channel_attr_write_longlong(dev->a, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "channel attribute write error"};
+    }
     return *this;
 }
 
 Channel_Attribute& Channel_Attribute::operator = (bool str){
-    iio_channel_attr_write_bool(dev->a, key.c_str(), str);
+    int err;
+    if ((err = iio_channel_attr_write_bool(dev->a, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "channel attribute write error"};
+    }
     return *this;
 }
 
 Channel_Attribute& Channel_Attribute::operator = (double str){
-    iio_channel_attr_write_double(dev->a, key.c_str(), str);
+    int err;
+    if((err = iio_channel_attr_write_double(dev->a, key.c_str(), str)) < 0) {
+        throw std::system_error{-err, std::generic_category(), "channel attribute write error"};
+    }
     return *this;
-}
-
-Channel_Attribute& Channel_Attribute::operator =(Channel_Attribute d) {
-    iio_channel_attr_write(dev->a, key.c_str(), iio_channel_find_attr(d.dev->a, d.key.c_str()));
-    return *this;
-}
-bool Channel_Attribute::operator ==(Channel_Attribute d) {
-    char tmp[MAXATRLENGTH];
-    iio_channel_attr_read(dev->a, key.c_str(), tmp, MAXATRLENGTH);
-    std::string s(tmp);
-    iio_channel_attr_read(d.dev->a, d.key.c_str(), tmp, MAXATRLENGTH);
-    std::string s1(tmp);
-    return s == s1;
 }
 
 std::string Channel_Attribute::value() {
@@ -385,5 +425,10 @@ std::string Channel_Attribute::value() {
 }
 
 Channel Device_Channels::operator[] (std::string s) {
-    return Channel(iio_device_find_channel(a->dev, s.c_str(), out));
+    auto ret{iio_device_find_channel(a->dev, s.c_str(), out)};
+    if (ret == nullptr) {
+        int err = errno;
+        throw std::system_error{err, std::generic_category(), "channel not found"};
+    }
+    return Channel{ret};
 }
